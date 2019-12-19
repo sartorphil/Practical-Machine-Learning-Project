@@ -1,0 +1,161 @@
+---
+title: "Practical Machine Learning Prediction Assignment"
+author: "Phil Sartor"
+date: "12/18/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# The goal of our project is to predict the manner in which 6 participants did certain exercises.
+# Data is taken from accelerometers on the belt, forearm, arm, and dumbell. 
+# Participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+## Set working directory and load required libraries
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(caret)
+library(knitr)
+library(xtable)
+library(rpart)
+library(randomForest)
+library(rpart.plot)
+library(rattle)
+library(gbm)
+library(corrplot)
+rm(list = ls())
+set.seed(54321)
+setwd("/Users/psartor/Desktop/Data Management & Analytics/Practical Machine Learning/Week4")
+```
+
+## Load and explore the data
+
+```{r}
+# Load and read the training and test data into R using, read.csv function
+training  <- read.csv("pml-training.csv", na.strings = c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings = c("NA","DIV/0!",""))
+dim(training)
+dim(testing)
+str(training)
+```
+
+## The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. 
+## The "classe" variable in the training set is the outcome to predict.
+## There are 5 levels of classe "A", "B", "C", "D", "E".
+
+# Clean the data set
+## As we can see there are many "NAs" in the dataset.
+## We removed any features that contained NA values.
+
+```{r}
+training <- training[, colSums(is.na(training)) == 0] 
+testing <- testing[, colSums(is.na(testing)) == 0]
+```
+
+## Remove columns that do not contribute much to the accelerometer measurements.
+
+```{r}
+classe <- training$classe
+trainRemove <- grepl("^X|timestamp|window", names(training))
+training <- training[, !trainRemove]
+trainCleaned <- training[, sapply(training, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testing))
+testing <- testing[, !testRemove]
+testCleaned <- testing[, sapply(testing, is.numeric)]
+dim(trainCleaned)
+dim(testCleaned)
+```
+
+## Look for near zero variance data as it can be advantageous to remove the variable from the model.
+
+```{r}
+nzv <- nearZeroVar(trainCleaned, saveMetrics = TRUE)
+nzv
+```
+
+# Partitioning the training set into two datasets
+## Next, we can split the cleaned training set into a pure training data set (70%) and a validation data set (30%).
+## The training set is used to train or build the model.
+## The testing set (or validation set) is used to test or validate the model by estimating the prediction error.
+
+```{r}
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=F)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+# Graphical display to visualise the correlation matrix
+## In the following graph, positive correlations are displayed in blue and negative correlations in red. Colour intensity is proportional to the correlation coefficients.
+
+```{r}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, tl.cex = 0.5, tl.col = rgb(0, 0, 0), method="color", type = "upper")
+```
+
+# Prediction model building
+
+## We will use Random Forest, Decision Trees, and the Generalized Boosted Regression Model.
+## From this, we will determine the alogorithim that provides the best out-of-sample accuracy.
+
+# Prediction with Random Forest
+
+```{r}
+controlRF <- trainControl(method = "cv", number = 4, verbose = FALSE)
+modFitRandForest <- train(classe ~., data = trainData, method = "rf", 
+                 preProcess = c("center", "scale"), 
+                 trControl = controlRF)
+modFitRandForest
+```
+
+## Cross Validation on our testing data
+
+```{r}
+predR <- predict(modFitRandForest, newdata = testData)
+RF <- confusionMatrix(predR, testData$classe)
+RF$overall["Accuracy"]
+```
+
+# Prediction with Decision Tree 
+
+```{r}
+modFitDecTree <- rpart(classe ~., data = trainData, method = "class")
+modFitDecTree
+fancyRpartPlot(modFitDecTree)
+```
+
+## Cross Validation on our testing data
+
+```{r}
+predD <- predict(modFitDecTree, testData, type = "class")
+DT <-confusionMatrix(testData$classe, predD)
+DT
+DT$overall["Accuracy"]
+```
+
+# Prediction with Generalized Boosted Regression
+
+```{r}
+modFitBoostRegress <- train(classe ~., data = trainData, method = "gbm",verbose =  FALSE, trControl=trainControl(method = "cv", number = 4))
+modFitBoostRegress$finalModel
+```
+
+## Cross Validation on our testing data
+
+```{r}
+predG <- predict(modFitBoostRegress, testData)
+GBM <- confusionMatrix(testData$classe, predG)
+GBM$overall["Accuracy"]
+```
+
+# Applying the best model to the provided test set
+## The Random Forest model yielded the best prediction in in-sample. Therefore, this model will be applied to predict the provided 20 different test cases.
+
+```{r}
+FinalTestPred <- predict(modFitRandForest, newdata = testCleaned)
+FinalTestPred
+```
+
+
